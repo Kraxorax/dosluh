@@ -1,6 +1,6 @@
 import { Message } from "discord.js";
 import { actionMem, msgMem, rateLimits } from "./data";
-import { baseSysMsgGPT, generalChanId, goodMorningMsgGPT, gptError, heartBeatTime, sysMsgMap, toBotRegex } from './const'
+import { baseSysMsgGPT, generalChanId, goodMorningMsgGPT, goodNightMsgGPT, gptError, heartBeatTime, sysMsgMap, toBotRegex } from './const'
 import { client, openAI } from "./main";
 import { ChatCompletionCreateParamsNonStreaming } from "openai/resources/index.mjs";
 
@@ -17,6 +17,12 @@ const is7amInBelgradeSerbia = () => {
   const now = new Date()
   const belgrade = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Belgrade' }))
   return belgrade.getHours() === 7
+}
+
+const is9pmInBelgradeSerbia = () => {
+  const now = new Date()
+  const belgrade = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Belgrade' }))
+  return belgrade.getHours() === 21
 }
 
 const makeGptQuery = (msg: string, sysMsg: string, temp: number = 0.7): ChatCompletionCreateParamsNonStreaming => ({
@@ -93,6 +99,25 @@ const doGoodMorning = () => {
   }
 }
 
+const doGoodEvening = () => {
+  if (is9pmInBelgradeSerbia() && !actionMem.nightWelcomed) {
+    const query = makeGptQuery(goodNightMsgGPT, sysMsgMap.welcoming, 1)
+    openAI.chat.completions.create(query)
+      .then(completion => {
+        const nightMessage = completion.choices[0]?.message.content || gptError
+        client.channels.fetch(generalChanId)
+          .then(chan => {
+            chan?.isTextBased() ? chan.send(nightMessage) : void 0
+          })
+      })
+
+    actionMem.nightWelcomed = true
+  }
+  if (!is9pmInBelgradeSerbia() && actionMem.nightWelcomed) {
+    actionMem.nightWelcomed = false
+  }
+}
+
 export const heartBeat = () => {
   if (rateLimits.min.requestCount >= rateLimits.min.requestLimit
     || (rateLimits.day.requestCount / rateLimits.day.requestLimit) >= ((Date.now() - rateLimits.day.startTime) / rateLimits.day.boundaryTime)
@@ -102,6 +127,8 @@ export const heartBeat = () => {
   }
 
   doGoodMorning()
+
+  doGoodEvening()
 }
 
 

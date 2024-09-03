@@ -22,4 +22,5 @@ export const rateLimits = {
 
 export const actionMem = {
   morningWelcomed: false,
+  nightWelcomed: false
 }

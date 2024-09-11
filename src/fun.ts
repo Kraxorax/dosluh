@@ -1,8 +1,9 @@
-import { Message } from "discord.js";
+import { Message, TextChannel } from "discord.js";
 import { actionMem, msgMem, rateLimits } from "./data";
-import { baseSysMsgGPT, generalChanId, goodMorningMsgGPT, goodNightMsgGPT, gptError, heartBeatTime, sysMsgMap, toBotRegex } from './const'
+import { baseSysMsgGPT, contextMaxTimeStep, endContext, generalChanId, goodMorningMsgGPT, goodNightMsgGPT, gptError, startContext, sysMsgMap, toBotRegex } from './const'
 import { client, openAI } from "./main";
 import { ChatCompletionCreateParamsNonStreaming } from "openai/resources/index.mjs";
+import * as R from 'remeda'
 
 export const isBotTalk = (s: string) => {
   const regX = new RegExp(toBotRegex)
@@ -13,16 +14,40 @@ export const isLastMessage = (m: Message) => {
   return msgMem[msgMem.length - 1]?.id === m.id
 }
 
+const getGeneralChan = async (): Promise<TextChannel> => {
+  return await client.channels.fetch(generalChanId) as TextChannel
+}
+
 const is7amInBelgradeSerbia = () => {
   const now = new Date()
   const belgrade = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Belgrade' }))
-  return belgrade.getHours() === 7
+  return belgrade.getHours() === 7 && belgrade.getMinutes() === 0
 }
 
 const is9pmInBelgradeSerbia = () => {
   const now = new Date()
   const belgrade = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Belgrade' }))
-  return belgrade.getHours() === 21
+  return belgrade.getHours() === 21 && belgrade.getMinutes() === 0
+}
+
+const chanMsgsToPromptContext = (): string => {
+  // const msgs = msgMem.map(msg => `${msg.author.displayName}: ${msg.content}`).join('\n')
+
+  const msgs = [] as Message[]
+  const now = Date.now()
+  let msgIndex = 0
+  for (const msg of msgMem) {
+    if (msgIndex === 0 && now - msg.createdTimestamp > contextMaxTimeStep) {
+      break
+    }
+    const lastTime = msgIndex > 0 ? msg.createdTimestamp : now
+    if (lastTime - msg.createdTimestamp < contextMaxTimeStep) {
+      msgs.push(msg)
+    }
+  }
+
+
+  return `${startContext}\n${msgs}\n${endContext}`
 }
 
 const makeGptQuery = (msg: string, sysMsg: string, temp: number = 0.7): ChatCompletionCreateParamsNonStreaming => ({
@@ -84,12 +109,10 @@ const doGoodMorning = () => {
   if (is7amInBelgradeSerbia() && !actionMem.morningWelcomed) {
     const query = makeGptQuery(goodMorningMsgGPT, sysMsgMap.welcoming, 1)
     openAI.chat.completions.create(query)
-      .then(completion => {
+      .then(async (completion) => {
         const morningMessage = completion.choices[0]?.message.content || gptError
-        client.channels.fetch(generalChanId)
-          .then(chan => {
-            chan?.isTextBased() ? chan.send(morningMessage) : void 0
-          })
+        const genChan = await getGeneralChan()
+        genChan.send(morningMessage)
       })
 
     actionMem.morningWelcomed = true
@@ -103,12 +126,10 @@ const doGoodEvening = () => {
   if (is9pmInBelgradeSerbia() && !actionMem.nightWelcomed) {
     const query = makeGptQuery(goodNightMsgGPT, sysMsgMap.welcoming, 1)
     openAI.chat.completions.create(query)
-      .then(completion => {
+      .then(async (completion) => {
         const nightMessage = completion.choices[0]?.message.content || gptError
-        client.channels.fetch(generalChanId)
-          .then(chan => {
-            chan?.isTextBased() ? chan.send(nightMessage) : void 0
-          })
+        const genChan = await getGeneralChan()
+        genChan.send(nightMessage)
       })
 
     actionMem.nightWelcomed = true
@@ -118,11 +139,20 @@ const doGoodEvening = () => {
   }
 }
 
+const doTroll = () => {
+
+}
+
 export const heartBeat = () => {
   if (rateLimits.min.requestCount >= rateLimits.min.requestLimit
     || (rateLimits.day.requestCount / rateLimits.day.requestLimit) >= ((Date.now() - rateLimits.day.startTime) / rateLimits.day.boundaryTime)
   ) {
     console.log('~^-~^- heart beat skipped due to limits', rateLimits)
+    return
+  }
+
+  if (R.last(msgMem)?.author.bot) {
+    // da ne spama
     return
   }
 

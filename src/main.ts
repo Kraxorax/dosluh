@@ -3,6 +3,7 @@ import OpenAI from 'openai'
 import { Client, GatewayIntentBits, Partials } from 'discord.js'
 import { heartBeat, onMessageCreate } from './fun'
 import { heartBeatTime } from './const'
+import { msgMem } from './data'
 
 dotenv.config()
 
